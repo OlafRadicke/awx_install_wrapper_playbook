@@ -1,0 +1,130 @@
+---
+
+- name: install epel
+  package:
+    name:
+      - "epel-release"
+      - "curl"
+    state: present
+
+- name: install some system tools
+  package:
+    name:
+      - "jq"
+      - "yum-utils"
+      - "device-mapper-persistent-data"
+      - "lvm2"
+      - "ansible"
+      - "git"
+      - "python-devel"
+      - "python-pip"
+      - "python-docker-py"
+      - "python36-docker"
+    state: present
+
+# Dose not work...
+# - name: Add docker repository
+#   yum_repository:
+#     name: docker-ce
+#     description: Docker repo
+#     baseurl: https://download.docker.com/linux/centos/docker-ce.repo
+
+- name: Add docker repository
+  shell: |
+    yum-config-manager \
+        --add-repo \
+        https://download.docker.com/linux/centos/docker-ce.repo
+
+- name: install docker
+  package:
+    name:
+      - docker-ce
+
+- name: Make sure a service is running
+  systemd:
+    state: started
+    name: docker
+    enabled: yes
+
+# - name: Install docker compose
+#   shell: |
+#     curl -L "https://github.com/docker/compose/releases/download/1.24.1/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+#     sudo chmod +x /usr/local/bin/docker-compose
+
+- pip:
+    name: docker-compose==1.9.0
+
+- name: Server ip in the /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: 'awx'
+    line: "{{ awx.server_ip }} awx.widas.de awx"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create a directory if it does not exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    recurse: yes
+  loop:
+    - /srv/awx
+    - /var/lib/awx/projects
+    - /var/lib/pgdocker
+    - /etc/awx-ssl/
+
+- name: Make a self-signed ssl certificate
+  shell: |
+    openssl req -subj '/CN=widas.de/O=Widas/C=DE' \
+      -new -newkey rsa:2048 \
+      -sha256 -days 1365 \
+      -nodes -x509 \
+      -keyout /etc/awx-ssl/awx.key \
+      -out /etc/awx-ssl/awx.crt
+    cat /etc/awx-ssl/awx.key /etc/awx-ssl/awx.crt > \
+       /etc/awx-ssl/awx-bundled-key.crt
+
+
+- name: Clone git repo of awx
+  git:
+    repo: 'https://github.com/ansible/awx.git'
+    dest: /srv/awx
+    version: "{{ awx.tag }}"
+
+- name: Set postgres_data_dir
+  lineinfile:
+    path: /srv/awx/installer/inventory
+    regexp: '^postgres_data_dir='
+    line: "postgres_data_dir=/var/lib/pgdocker"
+
+- name: Set awx_official
+  lineinfile:
+    path: /srv/awx/installer/inventory
+    regexp: '^awx_official='
+    line: "awx_official=true"
+
+- name: Set project_data_dir
+  lineinfile:
+    path: /srv/awx/installer/inventory
+    regexp: '^project_data_dir='
+    line: "project_data_dir=/var/lib/awx/projects"
+
+- name: Set ssl_certificate
+  lineinfile:
+    path: /srv/awx/installer/inventory
+    regexp: '^ssl_certificate='
+    line: "ssl_certificate=/etc/awx-ssl/awx-bundled-key.crt"
+
+- name: Set admin_password
+  lineinfile:
+    path: /srv/awx/installer/inventory
+    regexp: '^admin_password='
+    line: "admin_password={{ awx.admin_password }}"
+
+- name: rum ansible playbook from awx
+  shell: ansible-playbook -i inventory install.yml -vv
+  args:
+    chdir: /srv/awx/installer/
+
+...

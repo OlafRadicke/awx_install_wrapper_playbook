@@ -1,0 +1,14 @@
+
+---
+
+- name: setup test environment
+  hosts: vpn_host
+  vars:
+    awx:
+      server_ip: "185.11.255.72"
+      tag: "9.0.1"
+      admin_password: "=[-p0o9i"
+  roles:
+    - role: awx
+
+...
